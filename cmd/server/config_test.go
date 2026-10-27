@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/misakano7545/workbuddy2api-panel/internal/upstream"
 )
 
 func TestDefault(t *testing.T) {
@@ -1095,5 +1097,58 @@ func TestPeriodicJitterPermillConfig(t *testing.T) {
 	}
 	if c2.Schedule.BalanceRefreshJitterPermill != 250 || c2.Schedule.TaskSweepJitterPermill != 100 {
 		t.Fatalf("env override: %+v", c2.Schedule)
+	}
+}
+
+func TestProxyDisabledByDefault(t *testing.T) {
+	c := Default()
+	if err := c.normalize(); err != nil {
+		t.Fatal(err)
+	}
+	if c.Proxy.Enabled {
+		t.Fatal("proxy should default off")
+	}
+	if c.Proxy.URL != upstream.DefaultProxyURL {
+		t.Fatalf("url=%q", c.Proxy.URL)
+	}
+}
+
+func TestProxyEnabledRequiresToken(t *testing.T) {
+	c := Default()
+	c.Proxy.Enabled = true
+	c.Proxy.Platform = "resin"
+	if err := c.normalize(); err == nil {
+		t.Fatal("enabled proxy without token should fail")
+	}
+}
+
+func TestProxyEnabledStaticURL(t *testing.T) {
+	c := Default()
+	c.Proxy.Enabled = true
+	c.Proxy.URL = "http://user:pass@127.0.0.1:8080"
+	if err := c.normalize(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestProxyEnvOverride(t *testing.T) {
+	t.Setenv("WB2A_PROXY_ENABLED", "true")
+	t.Setenv("WB2A_PROXY_PLATFORM", "resin")
+	t.Setenv("WB2A_PROXY_TOKEN", "sek")
+	c, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.Proxy.Enabled || c.Proxy.Platform != "resin" || c.Proxy.Token != "sek" {
+		t.Fatalf("%+v", c.Proxy)
+	}
+	var saw bool
+	for _, f := range c.EnvironmentManagedFields() {
+		if f == "proxy.enabled" {
+			saw = true
+		}
+	}
+	if !saw {
+		t.Fatalf("managed=%v", c.EnvironmentManagedFields())
 	}
 }

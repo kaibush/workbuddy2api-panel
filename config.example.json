@@ -74,6 +74,13 @@
     "dump_dir": "",
     "dump_max_bytes": 0
   },
+  "proxy": {
+    "_comment": "出站代理，默认关闭。url 支持 {平台名称}/{platform}、{account}、<token>/{token}。密码就是 token。同一账号固定出口，账号之间不共用连接。无账号请求直连。保存后热生效。",
+    "enabled": false,
+    "platform": "",
+    "token": "",
+    "url": "http://{平台名称}.{account}:<token>@207.58.173.239:2260"
+  },
   "features": {
     "sanitize_blacklist_fingerprints": true,
     "sanitize_brand_scope": "all",

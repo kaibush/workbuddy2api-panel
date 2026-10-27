@@ -116,7 +116,7 @@ func (c *Client) SetDNSDialer(d *net.Dialer) {
 		if cl == nil {
 			continue
 		}
-		if t, ok := cl.Transport.(*http.Transport); ok {
+		if t := HTTPTransport(cl.Transport); t != nil {
 			t.DialContext = d.DialContext
 		}
 	}

@@ -607,8 +607,8 @@ func TestNewChatClientNoTotalTimeoutAndSharedTransport(t *testing.T) {
 	if c.ChatHTTP.Transport != c.HTTP.Transport {
 		t.Errorf("ChatHTTP and HTTP must share the same *http.Transport")
 	}
-	htr, ok := c.ChatHTTP.Transport.(*http.Transport)
-	if !ok {
+	htr := HTTPTransport(c.ChatHTTP.Transport)
+	if htr == nil {
 		t.Fatalf("Transport type=%T", c.ChatHTTP.Transport)
 	}
 	if htr.ResponseHeaderTimeout != 60*time.Second { // 连接层加固：响应头上限从 120s 收到 60s（慢冷启动留 3.75× 余量）

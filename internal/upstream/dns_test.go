@@ -26,7 +26,7 @@ func TestNewDNSDialerWithoutServersKeepsSystemResolver(t *testing.T) {
 
 	c := New()
 	c.SetDNSDialer(NewDNSDialer(nil))
-	if c.HTTP.Transport.(*http.Transport).DialContext == nil {
+	if HTTPTransport(c.HTTP.Transport).DialContext == nil {
 		t.Fatal("不应把 DialContext 清成 nil")
 	}
 }
@@ -91,8 +91,8 @@ func TestSetDNSDialerWiresBothClients(t *testing.T) {
 	d := NewDNSDialer([]string{"127.0.0.1:53"})
 	c.SetDNSDialer(d)
 	for name, cl := range map[string]*http.Client{"HTTP": c.HTTP, "ChatHTTP": c.ChatHTTP} {
-		tr, ok := cl.Transport.(*http.Transport)
-		if !ok {
+		tr := HTTPTransport(cl.Transport)
+		if tr == nil {
 			t.Fatalf("%s Transport 类型变了：%T", name, cl.Transport)
 		}
 		if tr.DialContext == nil {
@@ -100,7 +100,7 @@ func TestSetDNSDialerWiresBothClients(t *testing.T) {
 		}
 	}
 	// 连接池参数不能被顺手改掉（挂 DNS 只该动 DialContext）。
-	tr := c.ChatHTTP.Transport.(*http.Transport)
+	tr := HTTPTransport(c.ChatHTTP.Transport)
 	if tr.MaxIdleConnsPerHost != maxIdleConnsPerHost || tr.IdleConnTimeout != idleConnTimeout {
 		t.Fatalf("连接池参数被改动：%+v", tr)
 	}
@@ -110,7 +110,7 @@ func TestSetDNSDialerWiresBothClients(t *testing.T) {
 func TestSetDNSDialerIgnoresNil(t *testing.T) {
 	c := New()
 	c.SetDNSDialer(nil)
-	if c.HTTP.Transport.(*http.Transport).DialContext == nil {
+	if HTTPTransport(c.HTTP.Transport).DialContext == nil {
 		t.Fatal("nil 拨号器不应清掉 DialContext")
 	}
 }

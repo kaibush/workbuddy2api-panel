@@ -102,6 +102,7 @@ func (c *Client) GlobalFetchCountries(a *auth.Auth, intlOnly bool) ([]GlobalCoun
 	if err != nil {
 		return nil, err
 	}
+	c.stampStickyAccount(req, a)
 	code, msg, raw, err := c.globalRegisterJSON(req)
 	if err != nil {
 		return nil, err
@@ -157,6 +158,7 @@ func (c *Client) GlobalRegisterStatus(a *auth.Auth) (activated bool, needsRegion
 		return false, false, "", err
 	}
 	req.Header.Set("X-User-Id", a.UID)
+	c.stampStickyAccount(req, a)
 	code, m, _, err := c.globalRegisterJSON(req)
 	if err != nil {
 		return false, false, "", err
@@ -187,6 +189,7 @@ func (c *Client) GlobalSubmitRegion(a *auth.Auth, country GlobalCountry) error {
 	if err != nil {
 		return err
 	}
+	c.stampStickyAccount(req, a)
 	code, msg, _, err := c.globalRegisterJSON(req)
 	if err != nil {
 		return err

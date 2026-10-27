@@ -1374,6 +1374,20 @@ legend { font-size: 12px; color: var(--ink-3); font-weight: 600; padding-bottom:
                 <span class="hint">影响官网积分记录「使用端」显示；需重启</span></label>
             </div>
             <div class="hr"></div>
+            <div class="switch"><span class="lb">出站代理</span>
+              <input type="checkbox" name="proxy_enabled"></div>
+            <div class="grid3">
+              <label class="fld"><span class="lb">代理平台</span>
+                <input name="proxy_platform" placeholder="resin 平台名" autocomplete="off">
+                <span class="hint">替换 URL 里的 {平台名称}</span></label>
+              <label class="fld"><span class="lb">代理 Token</span>
+                <input name="proxy_token" type="password" placeholder="粘性 token" autocomplete="off">
+                <span class="hint">替换 URL 里的 &lt;token&gt;</span></label>
+              <label class="fld"><span class="lb">代理 URL</span>
+                <input name="proxy_url" placeholder="http://{平台名称}.{account}:&lt;token&gt;@207.58.173.239:2260" autocomplete="off">
+                <span class="hint">留空恢复默认模板。同一账号固定出口，账号之间不共用连接；保存即生效。没带账号的请求仍直连</span></label>
+            </div>
+            <div class="hr"></div>
             <div class="grid2">
               <label class="fld"><span class="lb">模型黑名单</span>
                 <input name="models_hidden" placeholder="deepseek-pro, cn:legacy-model">

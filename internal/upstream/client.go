@@ -22,8 +22,8 @@ import (
 
 	"github.com/misakano7545/workbuddy2api-panel/internal/auth"
 	"github.com/misakano7545/workbuddy2api-panel/internal/cst"
-	"github.com/misakano7545/workbuddy2api-panel/internal/loginsite"
 	"github.com/misakano7545/workbuddy2api-panel/internal/logfmt"
+	"github.com/misakano7545/workbuddy2api-panel/internal/loginsite"
 )
 
 // ErrKind 错误分类，pool 据此决定冷却时长。
@@ -788,8 +788,11 @@ type Client struct {
 
 	// ChatHTTP 聊天 SSE 专用 client：无总时长上限（Timeout=0），首字节由
 	// Transport.ResponseHeaderTimeout 约束，流中空闲由 IdleTimeout 约束。
-	// 与 HTTP 共享同一个 *http.Transport 实例，连接池不重复。
+	// 与 HTTP 共享同一个 stickyProxy（内层仍是同一个 *http.Transport），连接池不重复。
 	ChatHTTP *http.Client
+
+	// proxy 出站粘性代理。nil 表示测试手搓的 Client，不走代理。
+	proxy *stickyProxy
 
 	// HeaderTimeout 聊天 SSE 首字节前（响应头）超时；<=0 表示未设置（回落 HTTP.Timeout）。
 	HeaderTimeout time.Duration
@@ -891,10 +894,11 @@ type CreditObserver func(uid string, credits int64)
 // TLS 握手超时 / 短 keepalive 探测 / 失败清池，参数见 transport.go——吸收上游
 // kongjianguan 4 连击实测经验）。
 func New() *Client {
-	tr := newTransport()
+	rt := newProxyRT()
 	c := &Client{
-		HTTP:          &http.Client{Timeout: 120 * time.Second, Transport: tr},
-		ChatHTTP:      &http.Client{Timeout: 0, Transport: tr}, // 无总时长；首字节由 ResponseHeaderTimeout 管
+		proxy:    rt,
+		HTTP:     &http.Client{Timeout: 120 * time.Second, Transport: rt},
+		ChatHTTP: &http.Client{Timeout: 0, Transport: rt}, // 无总时长；首字节由 ResponseHeaderTimeout 管
 		// ChatBaseCN 取官方桌面端的 endpoint（product.json），不是备选入口
 		// copilot.tencent.com —— 后者是官方 NetworkFailover 里的备选，主入口才是
 		// www.workbuddy.cn。生产实测（同一账号）：/v3/config、billing 汇总、chat
@@ -1848,9 +1852,9 @@ type v3ModelPromotion struct {
 	// id+name+tags）。实测 2026-10-22：global 的 hy-image-3.5 只出现在这里、
 	// data.models 里没有——只按 models 解析会得出「国际版没有出图模型」的假
 	// 结论（实际可调：200 + usage{output_image_tokens:15000, credit:0.27}）。
-	ID   string   `json:"id"`
-	Name string   `json:"name"`
-	Tags []string `json:"tags"`
+	ID    string   `json:"id"`
+	Name  string   `json:"name"`
+	Tags  []string `json:"tags"`
 	Badge *struct {
 		Label string `json:"label"`
 	} `json:"badge"`
@@ -2199,6 +2203,7 @@ func (c *Client) fetchV3ConfigModelMap(a *auth.Auth, ua string) (map[string]Mode
 	}
 	req.Header.Set("User-Agent", ua)
 	c.injectCodeBuddyRequest(req)
+	c.stampStickyAccount(req, a)
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return nil, err

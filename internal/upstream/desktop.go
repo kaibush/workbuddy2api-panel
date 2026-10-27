@@ -188,6 +188,7 @@ func (c *Client) ReportDesktopEvent(a *auth.Auth, events ...DesktopEvent) error 
 	if a.UID != "" {
 		req.Header.Set("X-User-Id", a.UID)
 	}
+	c.stampStickyAccount(req, a)
 	_, err = c.doJSON(req)
 	return err
 }
@@ -287,6 +288,7 @@ func (c *Client) SetAppearanceTheme(a *auth.Auth, resourceKey string) error {
 	if a.UID != "" {
 		req.Header.Set("X-User-Id", a.UID)
 	}
+	c.stampStickyAccount(req, a)
 	_, err = c.doJSON(req)
 	return err
 }
@@ -356,6 +358,7 @@ func (c *Client) ReportWebEvent(a *auth.Auth, eventCode, pageURL, elementID, ele
 	if a.UID != "" {
 		req.Header.Set("X-User-Id", a.UID)
 	}
+	c.stampStickyAccount(req, a)
 	_, err = c.doJSON(req)
 	return err
 }
@@ -483,6 +486,7 @@ func (c *Client) marketExpertList(a *auth.Auth, body map[string]any) ([]MarketEx
 	if a.UID != "" {
 		req.Header.Set("X-User-Id", a.UID)
 	}
+	c.stampStickyAccount(req, a)
 	var out struct {
 		Experts []MarketExpert `json:"experts"`
 	}

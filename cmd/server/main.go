@@ -202,7 +202,7 @@ func main() {
 	up.HTTP.Timeout = time.Duration(cfg.Upstream.TimeoutSeconds) * time.Second
 	// 聊天 SSE 首字节前（响应头）上限：cfg 已 normalize（缺省回落 timeout_seconds）。
 	up.HeaderTimeout = time.Duration(cfg.Upstream.HeaderTimeoutSeconds) * time.Second
-	if tr, ok := up.ChatHTTP.Transport.(*http.Transport); ok {
+	if tr := upstream.HTTPTransport(up.ChatHTTP.Transport); tr != nil {
 		tr.ResponseHeaderTimeout = up.HeaderTimeout
 	}
 	// 聊天 SSE 流中空闲上限（S3 空闲监控读取）。
@@ -228,6 +228,12 @@ func main() {
 	up.DumpDir = cfg.Upstream.DumpDir
 	up.DumpRequestMax = cfg.Upstream.DumpMaxBytes
 	up.PassthroughIP = cfg.Upstream.PassthroughIP
+	up.SetProxy(upstream.ProxyConfig{
+		Enabled:  cfg.Proxy.Enabled,
+		Platform: cfg.Proxy.Platform,
+		Token:    cfg.Proxy.Token,
+		URL:      cfg.Proxy.URL,
+	})
 	// global realm 路由（config global 段）：上游侧开关（第一道闸）+ base 覆盖；
 	// auth 侧开关（auth.SetGlobalEnabled）是第二道闸，两者同 config global.enabled。
 	up.GlobalEnabled = cfg.Global.Enabled
@@ -801,6 +807,12 @@ func saveConfig(raw []byte, path string, live *livecfg.Holder, p *pool.Pool, up 
 	})
 	up.SanitizeFingerprints.Store(newCfg.Features.SanitizeBlacklistFingerprints)
 	up.SanitizeBrandScope.Store(newCfg.Features.SanitizeBrandScope)
+	up.SetProxy(upstream.ProxyConfig{
+		Enabled:  newCfg.Proxy.Enabled,
+		Platform: newCfg.Proxy.Platform,
+		Token:    newCfg.Proxy.Token,
+		URL:      newCfg.Proxy.URL,
+	})
 	p.SetBreaker(newCfg.Pool.BreakerThreshold, newCfg.BreakerCooldownDur, newCfg.BreakerCooldownMaxD)
 	p.SetMaxInFlight(newCfg.Pool.MaxInFlight)
 	p.SetMaxInFlightGlobal(newCfg.Pool.MaxInFlightGlobal)

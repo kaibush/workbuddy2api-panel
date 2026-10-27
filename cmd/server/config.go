@@ -15,6 +15,7 @@ import (
 
 	"github.com/misakano7545/workbuddy2api-panel/internal/prompt"
 	"github.com/misakano7545/workbuddy2api-panel/internal/safefile"
+	"github.com/misakano7545/workbuddy2api-panel/internal/upstream"
 )
 
 // Config 顶层配置。
@@ -238,6 +239,16 @@ type Config struct {
 		DumpMaxBytes int `json:"dump_max_bytes"`
 	} `json:"upstream"`
 
+	// Proxy 出站代理。默认关闭。URL 支持 Resin 粘性模板：
+	// http://{平台名称}.{account}:<token>@207.58.173.239:2260
+	// 同一账号固定出口，账号之间不共用连接。保存后热生效；无账号请求直连。
+	Proxy struct {
+		Enabled  bool   `json:"enabled"`
+		Platform string `json:"platform"`
+		Token    string `json:"token"`
+		URL      string `json:"url"`
+	} `json:"proxy"`
+
 	Features struct {
 		// SanitizeBlacklistFingerprints 出站请求体黑名单指纹脱敏（默认 true；false 完全还原）。
 		SanitizeBlacklistFingerprints bool `json:"sanitize_blacklist_fingerprints"`
@@ -459,6 +470,7 @@ func Default() *Config {
 	c.Schedule.TaskSweepEnabled = true
 	c.Schedule.TaskSweepMinutes = 15
 	c.Upstream.TimeoutSeconds = 120
+	c.Proxy.URL = upstream.DefaultProxyURL
 	// HeaderTimeoutSeconds/IdleTimeoutSeconds 默认 0（未设置态），回落见 normalize()。
 	c.Upstream.HeaderTimeoutSeconds = 0
 	c.Upstream.IdleTimeoutSeconds = 0
@@ -724,6 +736,20 @@ func applyEnv(c *Config) {
 			c.Pool.PreferExpiring = b
 		}
 	}
+	if v := os.Getenv("WB2A_PROXY_ENABLED"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			c.Proxy.Enabled = b
+		}
+	}
+	if v := os.Getenv("WB2A_PROXY_PLATFORM"); v != "" {
+		c.Proxy.Platform = v
+	}
+	if v := os.Getenv("WB2A_PROXY_TOKEN"); v != "" {
+		c.Proxy.Token = v
+	}
+	if v := os.Getenv("WB2A_PROXY_URL"); v != "" {
+		c.Proxy.URL = v
+	}
 }
 
 // EnvironmentManagedFields 列出被启动环境变量覆盖的配置字段路径（**值不回传**——
@@ -754,6 +780,8 @@ func (c *Config) EnvironmentManagedFields() []string {
 		{"WB2A_METRICS_ENABLED", "metrics.enabled", "bool"},
 		{"WB2A_BUDGET_DAILY_CREDIT_LIMIT", "budget.daily_credit_limit", "float"},
 		{"WB2A_ALERTING_ENABLED", "alerting.enabled", "bool"}, {"WB2A_ALERTING_WEBHOOK_URL", "alerting.webhook_url", ""},
+		{"WB2A_PROXY_ENABLED", "proxy.enabled", "bool"}, {"WB2A_PROXY_PLATFORM", "proxy.platform", ""},
+		{"WB2A_PROXY_TOKEN", "proxy.token", ""}, {"WB2A_PROXY_URL", "proxy.url", ""},
 	}
 	var out []string
 	for _, field := range fields {
@@ -1060,7 +1088,25 @@ func (c *Config) normalize() error {
 	if err := c.validateScheduleHours(); err != nil {
 		return err
 	}
-	return c.normalizePrompt()
+	if err := c.normalizePrompt(); err != nil {
+		return err
+	}
+	return c.normalizeProxy()
+}
+
+func (c *Config) normalizeProxy() error {
+	c.Proxy.Platform = strings.TrimSpace(c.Proxy.Platform)
+	c.Proxy.Token = strings.TrimSpace(c.Proxy.Token)
+	c.Proxy.URL = strings.TrimSpace(c.Proxy.URL)
+	if c.Proxy.URL == "" {
+		c.Proxy.URL = upstream.DefaultProxyURL
+	}
+	return upstream.ValidateProxy(upstream.ProxyConfig{
+		Enabled:  c.Proxy.Enabled,
+		Platform: c.Proxy.Platform,
+		Token:    c.Proxy.Token,
+		URL:      c.Proxy.URL,
+	})
 }
 
 // normalizePrompt 校验 prompt.mode 并按 file 加载提示词文本（custom/append 模式）。

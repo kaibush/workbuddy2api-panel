@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/misakano7545/workbuddy2api-panel/internal/upstream"
 )
 
 // TestConfigExampleIsValid 守卫仓库根目录的 config.example.json 是合法 JSON、
@@ -40,5 +42,11 @@ func TestConfigExampleIsValid(t *testing.T) {
 	// 口径）。空数组解析为非 nil 空切片；nil = 键缺失，用户无从发现白名单配置。
 	if c.Models.Allowed == nil {
 		t.Error("models.allowed 示例应存在（空数组即可），否则用户不知道有白名单开关")
+	}
+	if c.Proxy.Enabled {
+		t.Error("proxy.enabled 示例应为 false")
+	}
+	if c.Proxy.URL != upstream.DefaultProxyURL {
+		t.Errorf("proxy.url=%q want default resin template", c.Proxy.URL)
 	}
 }

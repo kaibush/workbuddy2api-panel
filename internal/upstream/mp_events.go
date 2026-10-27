@@ -70,6 +70,7 @@ func (c *Client) ReportMPEvent(a *auth.Auth, events ...map[string]any) error {
 	req.Header.Set("X-Client-Version", "2.4.0")
 	req.Header.Set("X-Client-Platform", "mp-weixin")
 	req.Header.Set("X-Platform", "wechatmp")
+	c.stampStickyAccount(req, a)
 	_, err = c.doJSON(req)
 	return err
 }

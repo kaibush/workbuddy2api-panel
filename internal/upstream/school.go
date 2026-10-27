@@ -32,6 +32,7 @@ func (c *Client) schoolJSON(a *auth.Auth, method, path string, body map[string]a
 	if a.UID != "" {
 		req.Header.Set("X-User-Id", a.UID)
 	}
+	c.stampStickyAccount(req, a)
 	data, err := c.doJSON(req)
 	if err != nil {
 		return err
