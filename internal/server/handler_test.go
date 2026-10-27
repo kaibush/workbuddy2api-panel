@@ -1144,6 +1144,53 @@ func TestChatTransportErrorDoesNotPenalize(t *testing.T) {
 	}
 }
 
+func TestChatProxyRejectionDoesNotRotateOrPenalize(t *testing.T) {
+	for _, refresh := range []bool{false, true} {
+		t.Run(fmt.Sprintf("refresh=%v", refresh), func(t *testing.T) {
+			var calls atomic.Int32
+			proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				w.Header().Set("X-Resin-Error", "AUTH_FAILED")
+				w.WriteHeader(http.StatusForbidden)
+			}))
+			defer proxy.Close()
+			expires := int64(9999999999)
+			if refresh {
+				expires = time.Now().Add(30 * time.Second).Unix()
+			}
+			p := testPoolWith(
+				&auth.Auth{UID: "u1", AccessToken: "at1", RefreshToken: "rt1", ExpiresAt: expires},
+				&auth.Auth{UID: "u2", AccessToken: "at2", RefreshToken: "rt2", ExpiresAt: expires},
+			)
+			defer p.Close()
+			up := upstream.New()
+			defer up.HTTP.CloseIdleConnections()
+			up.SetProxy(upstream.ProxyConfig{Enabled: true, URL: proxy.URL})
+			h := NewHandler(Config{Pool: p, Upstream: up, RefreshSkew: time.Minute})
+			for i := 0; i < 6; i++ {
+				before := calls.Load()
+				rec := httptest.NewRecorder()
+				h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"glm-5.2","messages":[]}`)))
+				if rec.Code != http.StatusBadGateway || !strings.Contains(rec.Body.String(), "outbound_proxy_error") || !strings.Contains(rec.Body.String(), "AUTH_FAILED") {
+					t.Fatalf("status=%d body=%s", rec.Code, rec.Body)
+				}
+				if calls.Load()-before > 1 {
+					t.Fatal("proxy rejection rotated accounts")
+				}
+			}
+			if calls.Load() == 0 {
+				t.Fatal("no CONNECT reached proxy")
+			}
+			for _, uid := range []string{"u1", "u2"} {
+				st, _ := p.Status(uid)
+				if st.Disabled || st.Cooling || st.ErrTotal != 0 || st.ConsecutiveFails != 0 || !st.DegradeUntil.IsZero() || st.InFlight != 0 {
+					t.Fatalf("proxy failure penalized account or leaked lease: %+v", st)
+				}
+			}
+		})
+	}
+}
+
 func TestChatHTTP5xxPenalizes(t *testing.T) {
 	p := testPoolWith(&auth.Auth{UID: "u1", AccessToken: "at1", ExpiresAt: 9999999999})
 	// 熔断阈值 1：一次 5xx 即触发熔断（连续失败语义并入熔断器）。

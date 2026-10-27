@@ -1,14 +1,135 @@
 package upstream
 
 import (
+	"crypto/x509"
+	"encoding/base64"
+	"errors"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/misakano7545/workbuddy2api-panel/internal/auth"
 )
+
+func TestProxyCONNECTReportsRejectionWithoutCredentials(t *testing.T) {
+	for _, tc := range []struct {
+		status int
+		code   string
+	}{
+		{403, "AUTH_FAILED"},
+		{407, "AUTH_REQUIRED"},
+		{404, "PLATFORM_NOT_FOUND"},
+		{503, "NO_AVAILABLE_NODES"},
+		{502, ""},
+	} {
+		t.Run(http.StatusText(tc.status), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodConnect {
+					t.Errorf("method=%s", r.Method)
+				}
+				want := "Basic " + base64.StdEncoding.EncodeToString([]byte("plat.acc:secret"))
+				if r.Header.Get("Proxy-Authorization") != want || r.Header.Get(stickyAccountHeader) != "" {
+					t.Error("incorrect proxy credentials or leaked sticky header")
+				}
+				w.Header().Set("X-Resin-Error", tc.code)
+				w.WriteHeader(tc.status)
+				io.WriteString(w, "secret must not appear in errors")
+			}))
+			defer srv.Close()
+			c := New()
+			defer c.HTTP.CloseIdleConnections()
+			c.SetProxy(ProxyConfig{Enabled: true, Platform: "plat", Token: "secret", URL: strings.Replace(srv.URL, "://", "://{platform}.{account}:{token}@", 1)})
+			req, _ := http.NewRequest(http.MethodGet, "https://upstream.invalid/", nil)
+			c.stampStickyAccount(req, &auth.Auth{UID: "acc"})
+			_, err := c.HTTP.Do(req)
+			var pe *ProxyConnectError
+			if !errors.As(err, &pe) || pe.Status != tc.status || pe.Code != tc.code {
+				t.Fatalf("want structured proxy rejection, got %v", err)
+			}
+			if strings.Contains(err.Error()+pe.Hint(), "secret") {
+				t.Fatal("proxy credentials leaked into error")
+			}
+		})
+	}
+}
+
+func TestProxyCONNECTStickyCredentialsAndTLS(t *testing.T) {
+	up := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get(stickyAccountHeader) != "" || r.Header.Get("Proxy-Authorization") != "" {
+			t.Error("proxy identity leaked to upstream")
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer up.Close()
+	var mu sync.Mutex
+	var credentials []string
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		credentials = append(credentials, r.Header.Get("Proxy-Authorization"))
+		mu.Unlock()
+		if r.Method != http.MethodConnect || r.Host != strings.TrimPrefix(up.URL, "https://") {
+			http.Error(w, "unexpected tunnel", 400)
+			return
+		}
+		target, err := net.DialTimeout("tcp", r.Host, time.Second)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer target.Close()
+		conn, rw, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer conn.Close()
+		rw.WriteString("HTTP/1.1 200 Connection Established\r\n\r\n")
+		rw.Flush()
+		done := make(chan struct{})
+		go func() { io.Copy(target, rw); target.Close(); close(done) }()
+		io.Copy(conn, target)
+		conn.Close()
+		<-done
+	}))
+	defer proxy.Close()
+	c := New()
+	defer c.HTTP.CloseIdleConnections()
+	c.HTTP.Timeout = 5 * time.Second
+	tr := HTTPTransport(c.HTTP.Transport)
+	tr.TLSClientConfig = up.Client().Transport.(*http.Transport).TLSClientConfig.Clone()
+	tr.TLSClientConfig.RootCAs = x509.NewCertPool()
+	tr.TLSClientConfig.RootCAs.AddCert(up.Certificate())
+	c.SetProxy(ProxyConfig{Enabled: true, Platform: "plat", Token: "p@ss /?", URL: strings.Replace(proxy.URL, "://", "://{platform}.{account}:{token}@", 1)})
+	for _, uid := range []string{"one", "one", "two", ""} {
+		req, _ := http.NewRequest(http.MethodGet, up.URL, nil)
+		c.stampStickyAccount(req, &auth.Auth{UID: uid})
+		resp, err := c.HTTP.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("status=%d", resp.StatusCode)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(credentials) != 2 {
+		t.Fatalf("want 2 account-specific tunnels, got %d", len(credentials))
+	}
+	for i, uid := range []string{"one", "two"} {
+		want := "Basic " + base64.StdEncoding.EncodeToString([]byte("plat."+uid+":p@ss /?"))
+		if credentials[i] != want {
+			t.Error("wrong CONNECT credentials")
+		}
+	}
+}
 
 func TestStickyProxyURLResinTemplate(t *testing.T) {
 	s := normalizeProxySettings(ProxyConfig{

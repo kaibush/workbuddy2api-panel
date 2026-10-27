@@ -15,6 +15,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"net/url"
@@ -61,7 +62,50 @@ func newProxyRT() *stickyProxy {
 	p := &stickyProxy{}
 	p.base = newTransport()
 	p.base.Proxy = p.proxyFor
+	p.base.OnProxyConnectResponse = func(_ context.Context, _ *url.URL, _ *http.Request, resp *http.Response) error {
+		if resp.StatusCode == http.StatusOK {
+			return nil
+		}
+		// CONNECT 尚未抵达业务上游，不能把代理拒绝当成账号故障。
+		// 不回显代理 URL、认证头或响应正文，避免代理凭据进入日志。
+		code := resp.Header.Get("X-Resin-Error")
+		switch code {
+		case "AUTH_FAILED", "AUTH_REQUIRED", "PLATFORM_NOT_FOUND", "ACCOUNT_REJECTED",
+			"NO_AVAILABLE_NODES", "UPSTREAM_CONNECT_FAILED", "UPSTREAM_TIMEOUT",
+			"UPSTREAM_REQUEST_FAILED", "INTERNAL_ERROR", "URL_PARSE_ERROR", "INVALID_PROTOCOL", "INVALID_HOST":
+		default:
+			code = ""
+		}
+		return &ProxyConnectError{Status: resp.StatusCode, Code: code}
+	}
 	return p
+}
+
+// ProxyConnectError 是代理建立 HTTPS 隧道时的拒绝，与 WorkBuddy HTTP 错误分开。
+type ProxyConnectError struct {
+	Status int
+	Code   string
+}
+
+func (e *ProxyConnectError) Error() string {
+	msg := fmt.Sprintf("outbound proxy CONNECT failed (HTTP %d)", e.Status)
+	if e.Code != "" {
+		msg += ": " + e.Code
+	}
+	return msg
+}
+
+func (e *ProxyConnectError) Hint() string {
+	switch {
+	case e.Code == "AUTH_FAILED" || e.Code == "AUTH_REQUIRED" || e.Status == http.StatusProxyAuthRequired:
+		return "代理认证失败：请核对代理 Token。Resin 使用 RESIN_PROXY_TOKEN（代理密码），不是 RESIN_ADMIN_TOKEN（后台密码）；密码末尾不加点。"
+	case e.Code == "PLATFORM_NOT_FOUND":
+		return "Resin 平台不存在：请填写 Resin 平台的名称，核对大小写。"
+	case e.Code == "NO_AVAILABLE_NODES":
+		return "Resin 平台没有可用节点，请检查平台筛选规则和节点健康状态。"
+	default:
+		return "出站代理未能建立连接，请检查代理配置和代理服务状态。"
+	}
 }
 
 func (p *stickyProxy) RoundTrip(req *http.Request) (*http.Response, error) {

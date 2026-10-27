@@ -1200,6 +1200,11 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 						logfmt.Label(acct.UID, acct.Nickname))
 				} else {
 					lastErr = err
+					var proxyErr *upstream.ProxyConnectError
+					if errors.As(err, &proxyErr) {
+						releaseHeld()
+						break // 代理拒绝刷新连接：不罚账号、不轮转。
+					}
 					if errors.As(err, &ue) && ue.Kind == upstream.ErrSessionDead {
 						h.cfg.Pool.Disable(acct.UID, "refresh session dead")
 					} else {
@@ -1247,6 +1252,11 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 				st.outcome = reqlog.OutcomeInterrupted
 				fail(acct.UID)
 				break
+			}
+			var proxyErr *upstream.ProxyConnectError
+			if errors.As(terr, &proxyErr) {
+				releaseHeld()
+				break // 代理隧道失败不能累计为账号连败。
 			}
 			h.cfg.Pool.NoteFailures(acct.UID)
 			fail(acct.UID)
@@ -1652,6 +1662,13 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 			st.credit, st.hasCredit = credit, true
 			h.cfg.Pool.NoteModelCost(acct.UID, bareModel, credit, total)
 		}
+		return
+	}
+	var proxyErr *upstream.ProxyConnectError
+	if errors.As(lastErr, &proxyErr) {
+		writeOpenAIErrorHint(w, http.StatusBadGateway, "outbound_proxy_error", proxyErr.Error(), proxyErr.Hint())
+		st.status = http.StatusBadGateway
+		st.outcome = reqlog.OutcomeHTTPError
 		return
 	}
 	// 末端错误透传（error-passthrough）：上游返回的错误原样透传，不再规范化成固定文案。
