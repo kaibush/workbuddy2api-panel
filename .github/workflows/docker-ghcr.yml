@@ -1,6 +1,7 @@
 name: docker-ghcr
 
 # 多架构镜像（amd64/arm64）自动构建并发布到 ghcr.io：
+# fork 构建：push 到 main 后发布 ghcr.io/kaibush/workbuddy2api-panel。
 #   - push 到 main / 打 v* tag / 手动触发 → 构建并推送
 #   - PR 触碰构建相关文件 → 仅构建验证，不推送
 # tag 说明：main 推 latest + main + sha-xxxxxx；时间标签 v2026.9.26.711 推同名镜像 tag
